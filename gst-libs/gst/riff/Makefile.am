@@ -49,6 +49,9 @@ GstRiff-@GST_MAJORMINOR@.gir: $(INTROSPECTION_SCANNER) libgstriff-@GST_MAJORMINO
 		--pkg gstreamer-interfaces-@GST_MAJORMINOR@ \
 		--pkg-export gstreamer-riff-@GST_MAJORMINOR@ \
 		--add-init-section="gst_init(NULL,NULL);" \
+		--cflags-begin \
+		-I $(srcdir)/../../ \
+		--cflags-end \
 		--output $@ \
 		$(gir_headers) \
 		$(gir_sources)

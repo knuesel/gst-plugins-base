@@ -12,7 +12,7 @@ TESTS_ENVIRONMENT = \
 	$(REGISTRY_ENVIRONMENT)					\
 	GST_PLUGIN_SYSTEM_PATH=					\
 	GST_PLUGIN_PATH=$(top_builddir)/gst:$(top_builddir)/sys:$(top_builddir)/ext:$(GST_PLUGINS_DIR) \
-	GST_PLUGIN_LOADING_WHITELIST="gstreamer:gst-plugins-base@$(top_builddir)" \
+	GST_PLUGIN_LOADING_WHITELIST="gstreamer;gst-plugins-base@$(subst /,\\,$(top_builddir))" \
 	GST_TAG_LICENSE_TRANSLATIONS_DICT="$(top_srcdir)/gst-libs/gst/tag/license-translations.dict"
 
 
@@ -106,6 +106,20 @@ else
 cxx_checks =
 endif
 
+if HAVE_SYS_SOCKET_H
+multifdsink_checks = \
+	elements/multifdsink
+else
+multifdsink_checks =
+endif
+
+if HAVE_SYS_SOCKET_H
+multifdsink_checks = \
+	elements/multifdsink
+else
+multifdsink_checks =
+endif
+
 check_PROGRAMS = \
 	$(check_alsa) \
 	$(check_gnomevfs) \
@@ -127,7 +141,7 @@ check_PROGRAMS = \
 	elements/ffmpegcolorspace \
 	elements/gdpdepay \
 	elements/gdppay \
-	elements/multifdsink \
+	$(multifdsink_checks) \
 	elements/playbin \
 	elements/playbin2 \
 	elements/playbin2-compressed \
