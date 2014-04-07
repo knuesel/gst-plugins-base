@@ -30,11 +30,19 @@ G_END_DECLS
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include "gsttcp.h"
+
+#ifdef G_OS_WIN32
+# include <winsock2.h>
+# ifndef socklen_t
+#  define socklen_t int
+# endif
+#else
+# include <sys/socket.h>
+# include <arpa/inet.h>
+# include <netinet/in.h>
+# include <netdb.h>
+#endif
 
 #include <fcntl.h>
 

@@ -42,8 +42,15 @@
 #include "gsttcpclientsrc.h"
 #include <string.h>             /* memset */
 #include <unistd.h>
-#include <arpa/inet.h>
 #include <fcntl.h>
+
+#ifndef G_OS_WIN32
+# include <arpa/inet.h>
+#else
+# ifndef ECONNREFUSED
+#  define ECONNREFUSED WSAECONNREFUSED
+# endif
+#endif
 
 
 GST_DEBUG_CATEGORY_STATIC (tcpclientsrc_debug);
@@ -198,29 +205,10 @@ gst_tcp_client_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
   /* read the buffer header if we're using a protocol */
   switch (src->protocol) {
     case GST_TCP_PROTOCOL_NONE:
-      ret = gst_tcp_read_buffer (GST_ELEMENT (src), src->sock_fd.fd,
+      ret = gst_tcp_read_buffer (GST_ELEMENT (src), &src->sock_fd,
           src->fdset, outbuf);
       break;
 
-    case GST_TCP_PROTOCOL_GDP:
-      /* get the caps if we're using GDP */
-      if (!src->caps_received) {
-        GstCaps *caps;
-
-        GST_DEBUG_OBJECT (src, "getting caps through GDP");
-        ret = gst_tcp_gdp_read_caps (GST_ELEMENT (src), src->sock_fd.fd,
-            src->fdset, &caps);
-
-        if (ret != GST_FLOW_OK)
-          goto no_caps;
-
-        src->caps_received = TRUE;
-        src->caps = caps;
-      }
-
-      ret = gst_tcp_gdp_read_buffer (GST_ELEMENT (src), src->sock_fd.fd,
-          src->fdset, outbuf);
-      break;
     default:
       /* need to assert as buf == NULL */
       g_assert ("Unhandled protocol type");
@@ -246,12 +234,6 @@ wrong_state:
   {
     GST_DEBUG_OBJECT (src, "connection to closed, cannot read data");
     return GST_FLOW_WRONG_STATE;
-  }
-no_caps:
-  {
-    GST_ELEMENT_ERROR (src, RESOURCE, READ, (NULL),
-        ("Could not read caps through GDP"));
-    return ret;
   }
 }
 
@@ -321,7 +303,11 @@ gst_tcp_client_src_start (GstBaseSrc * bsrc)
   GST_DEBUG_OBJECT (src, "opening receiving client socket to %s:%d",
       src->host, src->port);
 
+#ifdef G_OS_WIN32
+  if ((src->sock_fd.fd = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+#else
   if ((src->sock_fd.fd = socket (AF_INET, SOCK_STREAM, 0)) == -1)
+#endif
     goto no_socket;
 
   GST_DEBUG_OBJECT (src, "opened receiving client socket with fd %d",
@@ -372,7 +358,7 @@ name_resolv:
 connect_failed:
   {
     gst_tcp_client_src_stop (GST_BASE_SRC (src));
-    switch (errno) {
+    switch (WSAGetLastError()) {
       case ECONNREFUSED:
         GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ,
             (_("Connection to %s:%d refused."), src->host, src->port), (NULL));
@@ -380,7 +366,7 @@ connect_failed:
       default:
         GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
             ("connect to %s:%d failed: %s", src->host, src->port,
-                g_strerror (errno)));
+                g_strerror (WSAGetLastError())));
         break;
     }
     return FALSE;

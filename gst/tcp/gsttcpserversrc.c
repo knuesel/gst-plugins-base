@@ -42,8 +42,11 @@
 #include "gsttcpserversrc.h"
 #include <string.h>             /* memset */
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include <fcntl.h>
+
+#ifndef G_OS_WIN32
+# include <sys/ioctl.h>
+#endif
 
 
 GST_DEBUG_CATEGORY_STATIC (tcpserversrc_debug);
@@ -177,23 +180,32 @@ restart:
   } else {
     /* else wait on server socket for connections */
     gst_poll_fd_ctl_read (src->fdset, &src->server_sock_fd, TRUE);
+
+    /* no action (0) is an error too in our case */
+    if ((ret = gst_poll_wait (src->fdset, GST_CLOCK_TIME_NONE)) <= 0) {
+      if (ret == -1 && errno == EBUSY)
+        goto select_cancelled;
+      else
+        goto select_error;
+    }
   }
 
-  /* no action (0) is an error too in our case */
-  if ((ret = gst_poll_wait (src->fdset, GST_CLOCK_TIME_NONE)) <= 0) {
-    if (ret == -1 && errno == EBUSY)
-      goto select_cancelled;
-    else
-      goto select_error;
-  }
 
   /* if we have no client socket we can accept one now */
   if (src->client_sock_fd.fd < 0) {
     if (gst_poll_fd_can_read (src->fdset, &src->server_sock_fd)) {
+#ifdef G_OS_WIN32
+      src->client_sin_len = sizeof(src->client_sin);
+      if ((src->client_sock_fd.fd =
+              accept (src->server_sock_fd.fd,
+                  (struct sockaddr *) &src->client_sin,
+                  &src->client_sin_len)) == INVALID_SOCKET)
+#else
       if ((src->client_sock_fd.fd =
               accept (src->server_sock_fd.fd,
                   (struct sockaddr *) &src->client_sin,
                   &src->client_sin_len)) == -1)
+#endif
         goto accept_error;
 
       gst_poll_add_fd (src->fdset, &src->client_sock_fd);
@@ -206,38 +218,8 @@ restart:
 
   switch (src->protocol) {
     case GST_TCP_PROTOCOL_NONE:
-      ret = gst_tcp_read_buffer (GST_ELEMENT (src), src->client_sock_fd.fd,
+      ret = gst_tcp_read_buffer (GST_ELEMENT (src), &src->client_sock_fd,
           src->fdset, outbuf);
-      break;
-
-    case GST_TCP_PROTOCOL_GDP:
-      if (!src->caps_received) {
-        GstCaps *caps;
-        gchar *string;
-
-        ret = gst_tcp_gdp_read_caps (GST_ELEMENT (src), src->client_sock_fd.fd,
-            src->fdset, &caps);
-
-        if (ret == GST_FLOW_WRONG_STATE)
-          goto gdp_cancelled;
-
-        if (ret != GST_FLOW_OK)
-          goto gdp_caps_read_error;
-
-        src->caps_received = TRUE;
-        string = gst_caps_to_string (caps);
-        GST_DEBUG_OBJECT (src, "Received caps through GDP: %s", string);
-        g_free (string);
-
-        gst_pad_set_caps (GST_BASE_SRC_PAD (psrc), caps);
-      }
-
-      ret = gst_tcp_gdp_read_buffer (GST_ELEMENT (src), src->client_sock_fd.fd,
-          src->fdset, outbuf);
-
-      if (ret == GST_FLOW_OK)
-        gst_buffer_set_caps (*outbuf, GST_PAD_CAPS (GST_BASE_SRC_PAD (src)));
-
       break;
 
     default:
@@ -278,22 +260,9 @@ select_cancelled:
 accept_error:
   {
     GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
-        ("Could not accept client on server socket: %s", g_strerror (errno)));
+        ("Could not accept client on server socket: %s (%d)",
+         g_strerror (WSAGetLastError()), WSAGetLastError()));
     return GST_FLOW_ERROR;
-  }
-gdp_cancelled:
-  {
-    GST_DEBUG_OBJECT (src, "reading gdp canceled");
-    return GST_FLOW_WRONG_STATE;
-  }
-gdp_caps_read_error:
-  {
-    /* if we did not get canceled, report an error */
-    if (ret != GST_FLOW_WRONG_STATE) {
-      GST_ELEMENT_ERROR (src, RESOURCE, READ, (NULL),
-          ("Could not read caps through GDP"));
-    }
-    return ret;
   }
 }
 
@@ -355,20 +324,35 @@ gst_tcp_server_src_start (GstBaseSrc * bsrc)
   int ret;
   GstTCPServerSrc *src = GST_TCP_SERVER_SRC (bsrc);
 
+#ifdef G_OS_WIN32
+  BOOL sockopt;
+#else
+  int sockopt;
+#endif
+
   /* reset caps_received flag */
   src->caps_received = FALSE;
 
   /* create the server listener socket */
+#ifdef G_OS_WIN32
+  if ((src->server_sock_fd.fd = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+#else
   if ((src->server_sock_fd.fd = socket (AF_INET, SOCK_STREAM, 0)) == -1)
+#endif
     goto socket_error;
 
   GST_DEBUG_OBJECT (src, "opened receiving server socket with fd %d",
       src->server_sock_fd.fd);
 
   /* make address reusable */
-  ret = 1;
-  if (setsockopt (src->server_sock_fd.fd, SOL_SOCKET, SO_REUSEADDR, &ret,
-          sizeof (int)) < 0)
+  sockopt = 1;
+#ifdef G_OS_WIN32
+  if (setsockopt (src->server_sock_fd.fd, SOL_SOCKET, SO_REUSEADDR, (char*)&sockopt,
+          sizeof (sockopt)) != 0)
+#else
+  if (setsockopt (src->server_sock_fd.fd, SOL_SOCKET, SO_REUSEADDR, &sockopt,
+          sizeof (sockopt)) < 0)
+#endif
     goto sock_opt;
 
   /* name the socket */
@@ -418,7 +402,7 @@ socket_error:
 sock_opt:
   {
     GST_ELEMENT_ERROR (src, RESOURCE, SETTINGS, (NULL),
-        ("Could not setsockopt: %s", g_strerror (errno)));
+        ("Could not setsockopt: %s", g_strerror (WSAGetLastError())));
     gst_tcp_socket_close (&src->server_sock_fd);
     return FALSE;
   }
@@ -430,10 +414,10 @@ host_error:
 bind_error:
   {
     gst_tcp_socket_close (&src->server_sock_fd);
-    switch (errno) {
+    switch (WSAGetLastError()) {
       default:
         GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
-            ("bind failed: %s", g_strerror (errno)));
+            ("bind failed: %s", g_strerror (WSAGetLastError())));
         break;
     }
     return FALSE;
@@ -442,7 +426,7 @@ listen_error:
   {
     gst_tcp_socket_close (&src->server_sock_fd);
     GST_ELEMENT_ERROR (src, RESOURCE, OPEN_READ, (NULL),
-        ("Could not listen on server socket: %s", g_strerror (errno)));
+        ("Could not listen on server socket: %s", g_strerror (WSAGetLastError())));
     return FALSE;
   }
 socket_pair:

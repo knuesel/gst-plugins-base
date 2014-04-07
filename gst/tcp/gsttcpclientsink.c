@@ -42,6 +42,12 @@
 #include "gsttcpclientsink.h"
 #include <string.h>             /* memset */
 
+#ifdef G_OS_WIN32
+# ifndef ECONNREFUSED
+#  define ECONNREFUSED WSAECONNREFUSED
+# endif
+#endif
+
 /* TCPClientSink signals and args */
 enum
 {
@@ -199,36 +205,12 @@ gst_tcp_client_sink_setcaps (GstBaseSink * bsink, GstCaps * caps)
     case GST_TCP_PROTOCOL_NONE:
       break;
 
-    case GST_TCP_PROTOCOL_GDP:
-      /* if we haven't send caps yet, send them first */
-      if (!sink->caps_sent) {
-        const GstCaps *caps;
-        gchar *string;
-
-        caps = GST_PAD_CAPS (GST_PAD_PEER (GST_BASE_SINK_PAD (bsink)));
-        string = gst_caps_to_string (caps);
-        GST_DEBUG_OBJECT (sink, "Sending caps %s through GDP", string);
-        g_free (string);
-
-        if (!gst_tcp_gdp_write_caps (GST_ELEMENT (sink), sink->sock_fd.fd,
-                caps, TRUE, sink->host, sink->port))
-          goto gdp_write_error;
-
-        sink->caps_sent = TRUE;
-      }
-      break;
     default:
       g_warning ("Unhandled protocol type");
       break;
   }
 
   return TRUE;
-
-  /* ERRORS */
-gdp_write_error:
-  {
-    return FALSE;
-  }
 }
 
 static GstFlowReturn
@@ -251,12 +233,6 @@ gst_tcp_client_sink_render (GstBaseSink * bsink, GstBuffer * buf)
   switch (sink->protocol) {
     case GST_TCP_PROTOCOL_NONE:
       break;
-    case GST_TCP_PROTOCOL_GDP:
-      GST_LOG_OBJECT (sink, "Sending buffer header through GDP");
-      if (!gst_tcp_gdp_write_buffer (GST_ELEMENT (sink), sink->sock_fd.fd, buf,
-              TRUE, sink->host, sink->port))
-        goto gdp_write_error;
-      break;
     default:
       break;
   }
@@ -272,10 +248,6 @@ gst_tcp_client_sink_render (GstBaseSink * bsink, GstBuffer * buf)
   return GST_FLOW_OK;
 
   /* ERRORS */
-gdp_write_error:
-  {
-    return FALSE;
-  }
 write_error:
   {
     GST_ELEMENT_ERROR (sink, RESOURCE, WRITE,

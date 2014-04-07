@@ -27,13 +27,21 @@
 
 G_BEGIN_DECLS
 
-#include <netdb.h>                        /* sockaddr_in */
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>                   /* sockaddr_in */
 #include <unistd.h>
 
 #include "gsttcp.h"
+
+#ifdef G_OS_WIN32
+# include <winsock2.h>
+# ifndef socklen_t
+#  define socklen_t int
+# endif
+#else
+# include <sys/socket.h>
+# include <netinet/in.h>
+# include <netdb.h>
+#endif
 
 #define GST_TYPE_TCP_CLIENT_SRC \
   (gst_tcp_client_src_get_type())

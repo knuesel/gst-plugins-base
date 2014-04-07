@@ -34,13 +34,21 @@ G_BEGIN_DECLS
 #include <string.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
 #include <fcntl.h>
-#include <arpa/inet.h>
 #include "gstmultifdsink.h"
+
+#ifdef G_OS_WIN32
+# include <winsock2.h>
+# ifndef socklen_t
+#  define socklen_t int
+# endif
+#else
+# include <sys/socket.h>
+# include <arpa/inet.h>
+# include <netinet/in.h>
+# include <netdb.h>
+# include <sys/wait.h>
+#endif
 
 #define GST_TYPE_TCP_SERVER_SINK \
   (gst_tcp_server_sink_get_type())

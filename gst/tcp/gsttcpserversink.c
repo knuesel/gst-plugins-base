@@ -39,8 +39,6 @@
 #include <gst/gst-i18n-plugin.h>
 #include <string.h>             /* memset */
 
-#include <sys/ioctl.h>
-
 #ifdef HAVE_FIONREAD_IN_SYS_FILIO
 #include <sys/filio.h>
 #endif
@@ -48,6 +46,10 @@
 #include "gsttcp.h"
 #include "gsttcpserversink.h"
 #include "gsttcp-marshal.h"
+
+#ifndef G_OS_WIN32
+# include <sys/ioctl.h>
+#endif
 
 #define TCP_BACKLOG             5
 
@@ -149,7 +151,11 @@ gst_tcp_server_sink_handle_server_read (GstTCPServerSink * sink)
   /* new client */
   int client_sock_fd;
   struct sockaddr_in client_address;
+#ifdef G_OS_WIN32
+  int client_address_len
+#else
   socklen_t client_address_len;
+#endif
 
   /* For some stupid reason, client_address and client_address_len has to be
    * zeroed */
@@ -273,6 +279,10 @@ gst_tcp_server_sink_init_send (GstMultiFdSink * parent)
   int ret;
   GstTCPServerSink *this = GST_TCP_SERVER_SINK (parent);
 
+#ifdef G_OS_WIN32
+  u_long ioctlarg;
+#endif
+
   /* create sending server socket */
   if ((this->server_sock.fd = socket (AF_INET, SOCK_STREAM, 0)) == -1)
     goto no_socket;
@@ -306,7 +316,12 @@ gst_tcp_server_sink_init_send (GstMultiFdSink * parent)
     goto bind_failed;
 
   /* set the server socket to nonblocking */
+#ifdef G_OS_WIN32
+  ioctlarg = 1;
+  ioctlsocket (this->server_sock.fd, FIONBIO, &ioctlarg);
+#else
   fcntl (this->server_sock.fd, F_SETFL, O_NONBLOCK);
+#endif
 
   GST_DEBUG_OBJECT (this, "listening on server socket %d with queue of %d",
       this->server_sock.fd, TCP_BACKLOG);

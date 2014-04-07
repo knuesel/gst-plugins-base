@@ -33,22 +33,24 @@ GST_DEBUG_CATEGORY (tcp_debug);
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  gst_dp_init ();
-
   if (!gst_element_register (plugin, "tcpclientsink", GST_RANK_NONE,
           GST_TYPE_TCP_CLIENT_SINK))
     return FALSE;
   if (!gst_element_register (plugin, "tcpclientsrc", GST_RANK_NONE,
           GST_TYPE_TCP_CLIENT_SRC))
     return FALSE;
+#ifndef G_OS_WIN32
   if (!gst_element_register (plugin, "tcpserversink", GST_RANK_NONE,
           GST_TYPE_TCP_SERVER_SINK))
     return FALSE;
+#endif
   if (!gst_element_register (plugin, "tcpserversrc", GST_RANK_NONE,
           GST_TYPE_TCP_SERVER_SRC))
     return FALSE;
+#ifndef G_OS_WIN32
   if (!gst_element_register (plugin, "multifdsink", GST_RANK_NONE,
           GST_TYPE_MULTI_FD_SINK))
+#endif
     return FALSE;
 
   GST_DEBUG_CATEGORY_INIT (tcp_debug, "tcp", 0, "TCP calls");
